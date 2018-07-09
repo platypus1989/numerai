@@ -10,6 +10,24 @@ from sklearn.metrics import accuracy_score, log_loss
 from time import time
 import tensorflow as tf
 from sklearn.preprocessing import OneHotEncoder
+import os
+os.chdir('C:/Users/n0269042/Documents/numerai')
+
+training_data = pd.read_csv('data/numerai_20180530/numerai_training_data.csv', header=0)
+tournament_data = pd.read_csv('data/numerai_20180530/numerai_tournament_data.csv', header=0)
+example_prediction = pd.read_csv('data/numerai_20180530/example_predictions.csv', header=0)
+
+validation_data = tournament_data[tournament_data.data_type == 'validation']
+
+X_train = training_data.drop(['id', 'era', 'data_type', 'target'], axis = 1).values
+y_train = training_data.target.values
+
+X_validation = validation_data.drop(['id', 'era', 'data_type', 'target'], axis = 1).values
+y_validation = validation_data.target.values
+
+X_test = tournament_data.drop(['id', 'era', 'data_type', 'target'], axis = 1).values
+
+
 onehot_encoder = OneHotEncoder(sparse=False)
 
 def accuracy(predictions, labels):
@@ -20,9 +38,10 @@ def accuracy(predictions, labels):
 train_dataset = X_train.astype(np.float32)
 train_labels = onehot_encoder.fit_transform(y_train.reshape([y_train.shape[0], 1]))
 
-test_dataset = X_validation.astype(np.float32)
-test_labels = onehot_encoder.fit_transform(y_validation.reshape([y_validation.shape[0], 1]))
+validation_dataset = X_validation.astype(np.float32)
+validation_labels = onehot_encoder.fit_transform(y_validation.reshape([y_validation.shape[0], 1]))
 
+test_dataset = X_test.astype(np.float32)
 
 batch_size = 128
 num_features = 50
@@ -37,6 +56,7 @@ with graph.as_default():
   tf_train_dataset = tf.placeholder(
     tf.float32, shape=(batch_size, num_features))
   tf_train_labels = tf.placeholder(tf.float32, shape=(batch_size, num_labels))
+  tf_validation_dataset = tf.constant(validation_dataset)
   tf_test_dataset = tf.constant(test_dataset)
 
  # tf_new_input = tf.placeholder(tf.float32, shape=(1, num_features))  
@@ -47,7 +67,7 @@ with graph.as_default():
   
   layer1_biases = tf.Variable(tf.zeros(
       [num_labels]), name = 'b1')
-  
+ 
   logits = tf.matmul(tf_train_dataset, layer1_weights) + layer1_biases
   
   loss = tf.reduce_mean(
@@ -55,12 +75,13 @@ with graph.as_default():
     
   # Optimizer.
   global_step = tf.Variable(0)  # count the number of steps taken.
-  learning_rate = tf.train.exponential_decay(0.1, global_step, 5000, 0.2)
+  learning_rate = tf.train.exponential_decay(0.1, global_step, 5000, 0.5)
   optimizer = tf.train.GradientDescentOptimizer(learning_rate).minimize(loss, global_step=global_step)
   #optimizer = tf.train.GradientDescentOptimizer(0.05).minimize(loss)
   
   # Predictions for the training, validation, and test data.
   train_prediction = tf.nn.sigmoid(logits)
+  validation_prediction = tf.nn.sigmoid(tf.matmul(tf_validation_dataset, layer1_weights) + layer1_biases) 
   test_prediction = tf.nn.sigmoid(tf.matmul(tf_test_dataset, layer1_weights) + layer1_biases)
  # new_prediction = tf.nn.softmax(tf.matmul(new_hidden, layer4_weights) + layer4_biases)
 
@@ -80,7 +101,12 @@ with tf.Session(graph=graph) as session:
     if (step % 50 == 0):
       print('Minibatch loss at step %d: %f' % (step, l))
       #print('Minibatch accuracy: %f' % log_loss(batch_labels.argmax(axis=1), predictions))
-      print('Test accuracy: %f' % log_loss(test_labels.argmax(axis=1), test_prediction.eval()))  
+      print('Test accuracy: %f' % log_loss(validation_labels.argmax(axis=1), validation_prediction.eval()))  
       #print(hidden.eval(feed_dict = feed_dict))  # weird...
+  pred_proba = test_prediction.eval()
   save_path = saver.save(session, "C:/Users/n0269042/Documents/model.ckpt")
   print("Model saved in path: %s" % save_path)
+
+test_submission = pd.DataFrame({'id': tournament_data.id, 'probability': pred_proba[:,1]})
+test_submission.to_csv('submission/test_submission_20180530_1.csv', index=False)
+
